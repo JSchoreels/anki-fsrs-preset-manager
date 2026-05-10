@@ -1,0 +1,8 @@
+{
+  "package": "fsrs_preset_manager",
+  "name": "FSRS Preset Manager",
+  "mod": 0,
+  "author": "JSchoreels",
+  "version": "0.1.0",
+  "homepage": "https://github.com/JSchoreels/anki-fsrs-preset-manager"
+}
