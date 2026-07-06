@@ -7,6 +7,7 @@ Manage FSRS deck options from one table instead of opening every preset one by o
 - Shows your FSRS presets in a single window.
 - Edits preset FSRS version on Anki builds that expose the FSRS picker.
 - Edits preset Desired Retention.
+- Edits preset Learning and Relearning steps using Anki's step format.
 - Runs Optimize for a preset.
 - Runs Evaluate for a preset.
 - Shows the current FSRS parameters for each preset.
@@ -37,6 +38,10 @@ Disable it if you want to see every preset.
 Use **Default FSRS** and **Apply FSRS to All Presets** to set the same FSRS version on every preset currently shown in the table.
 
 Use **Default DR** and **Apply DR to All Presets** to set the same Desired Retention on every preset currently shown in the table.
+
+Edit **Learning steps** and **Relearning steps** directly in the preset row. Use Anki's space-separated step format, for example `1m 10m`, `1h`, or `1d`.
+
+Use **Default learning steps**, **Default relearning steps**, and **Apply Steps to All Presets** to reset both step columns for every preset currently shown in the table.
 
 Click **Save** to write the changed preset values to Anki.
 

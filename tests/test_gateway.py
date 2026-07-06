@@ -16,6 +16,7 @@ from fsrs_preset_manager.gateway import (
     include_same_day_evaluate,
     include_same_day_optimize,
     preset_search,
+    relearning_steps_in_day,
 )
 
 
@@ -159,6 +160,8 @@ class FakeDecks:
                 "desiredRetention": 0.9,
                 "fsrsVersion": 0,
                 "fsrsParams7": [1.0, 2.0],
+                "new": {"delays": [1.0, 10.0]},
+                "lapse": {"delays": [10.0]},
                 "other": '{"fsrs7IncludeSameDayOptimize": false, "fsrs7IncludeSameDayEvaluate": true}',
             }
         ]
@@ -222,6 +225,8 @@ def test_load_presets_groups_decks_and_reads_settings() -> None:
 
     assert len(presets) == 1
     assert presets[0].fsrs_versions == (0, 1)
+    assert presets[0].learning_steps == (1.0, 10.0)
+    assert presets[0].relearning_steps == (10.0,)
     assert presets[0].include_same_day_optimize is False
     assert presets[0].include_same_day_evaluate is True
     assert [deck.name for deck in presets[0].decks] == ["Japanese", "Japanese::Grammar"]
@@ -280,6 +285,25 @@ def test_save_deck_override_clears_to_none() -> None:
     gateway.save_deck_override(deck, None)
 
     assert mw.col.decks.saved_decks[-1]["desiredRetention"] is None
+
+
+def test_save_preset_updates_learning_and_relearning_steps() -> None:
+    mw = FakeMw()
+    gateway = AnkiGateway(mw)
+    preset = gateway.load_presets()[0]
+
+    gateway.save_preset(
+        preset,
+        desired_retention_value=0.9,
+        fsrs_version_value=0,
+        learning_steps_value=(2.0, 15.0),
+        relearning_steps_value=(20.0,),
+        include_same_day_optimize=False,
+        include_same_day_evaluate=True,
+    )
+
+    assert mw.col.decks.saved_configs[-1]["new"]["delays"] == [2.0, 15.0]
+    assert mw.col.decks.saved_configs[-1]["lapse"]["delays"] == [20.0]
 
 
 def test_optimize_preset_passes_same_day_flag_and_saves_params() -> None:
@@ -341,6 +365,8 @@ def test_include_same_day_helpers_read_current_payload_after_save() -> None:
         preset,
         desired_retention_value=0.9,
         fsrs_version_value=0,
+        learning_steps_value=preset.learning_steps,
+        relearning_steps_value=preset.relearning_steps,
         include_same_day_optimize=True,
         include_same_day_evaluate=False,
     )
@@ -358,6 +384,8 @@ def test_save_preset_updates_fsrs_version_when_picker_is_supported() -> None:
         preset,
         desired_retention_value=0.9,
         fsrs_version_value=1,
+        learning_steps_value=preset.learning_steps,
+        relearning_steps_value=preset.relearning_steps,
         include_same_day_optimize=None,
         include_same_day_evaluate=None,
     )
@@ -375,6 +403,8 @@ def test_save_preset_does_not_create_fsrs_version_without_picker_support() -> No
         preset,
         desired_retention_value=0.9,
         fsrs_version_value=0,
+        learning_steps_value=preset.learning_steps,
+        relearning_steps_value=preset.relearning_steps,
         include_same_day_optimize=None,
         include_same_day_evaluate=None,
     )
@@ -391,6 +421,8 @@ def test_optimize_uses_current_payload_fsrs_version_after_save() -> None:
         preset,
         desired_retention_value=0.9,
         fsrs_version_value=1,
+        learning_steps_value=preset.learning_steps,
+        relearning_steps_value=preset.relearning_steps,
         include_same_day_optimize=None,
         include_same_day_evaluate=None,
     )
@@ -400,6 +432,10 @@ def test_optimize_uses_current_payload_fsrs_version_after_save() -> None:
     assert mw.col._backend.calls[-1][1]["fsrs_version"] == 1
     assert mw.col._backend.calls[-1][1]["current_params"] == (6.0,)
     assert mw.col.decks.saved_configs[-1]["fsrsParams6"] == [7.0, 8.0]
+
+
+def test_relearning_steps_in_day_counts_steps_before_one_day() -> None:
+    assert relearning_steps_in_day({"lapse": {"delays": [10, 60, 1440, 5]}}) == 2
 
 
 def test_compute_fsrs_params_uses_raw_protobuf_backend() -> None:

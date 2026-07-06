@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Mapping, MutableMapping, Sequence
 from typing import Any
 
@@ -17,6 +18,10 @@ FSRS_VERSION_LABELS = {
 
 _DESIRED_RETENTION_KEYS = ("desiredRetention", "desired_retention")
 _FSRS_VERSION_KEYS = ("fsrsVersion", "fsrs_version")
+_LEARNING_STEPS_KEYS = ("learnSteps", "learn_steps")
+_RELEARNING_STEPS_KEYS = ("relearnSteps", "relearn_steps")
+_LEARNING_STEPS_LEGACY_PATH = ("new", "delays")
+_RELEARNING_STEPS_LEGACY_PATH = ("lapse", "delays")
 _FSRS_PARAMS_BY_VERSION: dict[int, tuple[str, ...]] = {
     0: ("fsrsParams7", "fsrs_params_7", "fsrs_params7"),
     1: ("fsrsParams6", "fsrs_params_6", "fsrs_params6"),
@@ -50,6 +55,12 @@ def set_field(obj: Any, names: Sequence[str], value: Any) -> None:
         return
     target = next((name for name in names if hasattr(obj, name)), names[0])
     setattr(obj, target, value)
+
+
+def has_field(obj: Any, name: str) -> bool:
+    if isinstance(obj, Mapping):
+        return name in obj
+    return hasattr(obj, name)
 
 
 def int_field(obj: Any, names: Sequence[str]) -> int | None:
@@ -87,6 +98,114 @@ def desired_retention(payload: Any) -> float | None:
 def set_desired_retention(payload: Any, value: float | None) -> None:
     stored = None if value is None else float(value)
     set_field(payload, _DESIRED_RETENTION_KEYS, stored)
+
+
+def learning_steps(payload: Any) -> tuple[float, ...]:
+    return step_list(payload, _LEARNING_STEPS_KEYS, _LEARNING_STEPS_LEGACY_PATH)
+
+
+def set_learning_steps(payload: Any, steps: Sequence[float]) -> None:
+    set_step_list(payload, _LEARNING_STEPS_KEYS, _LEARNING_STEPS_LEGACY_PATH, steps)
+
+
+def relearning_steps(payload: Any) -> tuple[float, ...]:
+    return step_list(payload, _RELEARNING_STEPS_KEYS, _RELEARNING_STEPS_LEGACY_PATH)
+
+
+def set_relearning_steps(payload: Any, steps: Sequence[float]) -> None:
+    set_step_list(payload, _RELEARNING_STEPS_KEYS, _RELEARNING_STEPS_LEGACY_PATH, steps)
+
+
+def step_list(payload: Any, keys: Sequence[str], legacy_path: Sequence[str]) -> tuple[float, ...]:
+    if nested_field_exists(payload, legacy_path):
+        return _float_tuple(nested_field(payload, legacy_path))
+    for key in keys:
+        steps = _float_tuple(field(payload, key))
+        if steps or field(payload, key) is not None:
+            return steps
+    return ()
+
+
+def set_step_list(payload: Any, keys: Sequence[str], legacy_path: Sequence[str], steps: Sequence[float]) -> None:
+    stored = [float(step) for step in steps]
+    if nested_field_exists(payload, legacy_path):
+        nested = nested_field(payload, legacy_path[:-1])
+        set_field(nested, (legacy_path[-1],), stored)
+        if isinstance(payload, MutableMapping):
+            for key in keys:
+                payload.pop(key, None)
+        return
+    set_field(payload, keys, stored)
+
+
+def nested_field(obj: Any, path: Sequence[str]) -> Any:
+    current = obj
+    for name in path:
+        current = field(current, name)
+        if current is None:
+            return None
+    return current
+
+
+def nested_field_exists(obj: Any, path: Sequence[str]) -> bool:
+    current = obj
+    for name in path:
+        if not has_field(current, name):
+            return False
+        current = field(current, name)
+        if current is None:
+            return False
+    return True
+
+
+def format_steps(steps: Sequence[float]) -> str:
+    return " ".join(format_step(step) for step in steps)
+
+
+def format_step(step: float) -> str:
+    seconds = round(float(step) * 60)
+    if seconds == 0:
+        return "0s"
+    if seconds % 86400 == 0:
+        return f"{seconds // 86400}d"
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600}h"
+    if seconds % 60 == 0:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+def normalize_steps_text(value: str) -> str:
+    return format_steps(parse_steps(value))
+
+
+def parse_steps(value: str) -> tuple[float, ...]:
+    text = value.strip()
+    if not text:
+        return ()
+    steps: list[float] = []
+    for part in text.split():
+        step = step_to_minutes(part)
+        if step:
+            steps.append(step)
+    return tuple(steps)
+
+
+def step_to_minutes(text: str) -> float:
+    match = re.search(r"(\d+)(.*)", text)
+    if not match:
+        return 0.0
+    amount = int(match.group(1))
+    unit = match.group(2)
+    if unit == "s":
+        seconds = amount
+    elif unit == "h":
+        seconds = amount * 3600
+    elif unit == "d":
+        seconds = amount * 86400
+    else:
+        seconds = amount * 60
+    return min(seconds, 2**31) / 60
 
 
 def fsrs_version(payload: Any) -> int | None:

@@ -10,10 +10,14 @@ from .fsrs_payload import (
     available_fsrs_versions,
     desired_retention,
     fsrs_version,
+    learning_steps,
+    relearning_steps,
     same_day_settings,
     selected_fsrs_params,
     set_desired_retention,
     set_fsrs_version,
+    set_learning_steps,
+    set_relearning_steps,
     set_same_day_settings,
     set_selected_fsrs_params,
 )
@@ -63,6 +67,8 @@ class AnkiGateway:
                     desired_retention=desired_retention(config),
                     fsrs_version=fsrs_version(config),
                     fsrs_versions=available_fsrs_versions(config),
+                    learning_steps=learning_steps(config),
+                    relearning_steps=relearning_steps(config),
                     include_same_day_optimize=include_optimize,
                     include_same_day_evaluate=include_evaluate,
                     params=selected_fsrs_params(config),
@@ -82,10 +88,14 @@ class AnkiGateway:
         *,
         desired_retention_value: float,
         fsrs_version_value: int | None,
+        learning_steps_value: tuple[float, ...],
+        relearning_steps_value: tuple[float, ...],
         include_same_day_optimize: bool | None,
         include_same_day_evaluate: bool | None,
     ) -> None:
         set_desired_retention(preset.payload, desired_retention_value)
+        set_learning_steps(preset.payload, learning_steps_value)
+        set_relearning_steps(preset.payload, relearning_steps_value)
         if preset.fsrs_versions and fsrs_version_value is not None:
             set_fsrs_version(preset.payload, fsrs_version_value)
         if (
@@ -100,9 +110,11 @@ class AnkiGateway:
             )
         self.mw.col.decks.update_config(preset.payload)
         LOGGER.info(
-            "saved preset fsrs settings preset_id=%s fsrs_version=%s",
+            "saved preset fsrs settings preset_id=%s fsrs_version=%s learning_steps=%s relearning_steps=%s",
             preset.preset_id,
             fsrs_version(preset.payload),
+            len(learning_steps_value),
+            len(relearning_steps_value),
         )
 
     def save_deck_override(self, deck: DeckEntry, desired_retention_value: float | None) -> None:
@@ -257,14 +269,10 @@ def ignore_revlogs_before_ms(payload: Any) -> int:
 
 
 def relearning_steps_in_day(payload: Any) -> int:
-    steps = field(payload, "relearnSteps") or field(payload, "relearn_steps") or []
     total_minutes = 0.0
     count = 0
-    for step in steps:
-        try:
-            total_minutes += float(step)
-        except (TypeError, ValueError):
-            continue
+    for step in relearning_steps(payload):
+        total_minutes += step
         if total_minutes >= 1440:
             break
         count += 1

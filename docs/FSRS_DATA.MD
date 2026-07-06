@@ -9,6 +9,9 @@ Preset rows map to deck configuration records returned by `mw.col.decks.all_conf
 The add-on reads and writes:
 
 - `desiredRetention` / `desired_retention`: preset-level desired retention.
+- `new.delays`: Anki legacy deck-config learning steps, stored as minute values.
+- `lapse.delays`: Anki legacy deck-config relearning steps, stored as minute values.
+- `learnSteps` / `learn_steps` and `relearnSteps` / `relearn_steps`: newer/proto-like step keys supported by the helper layer when the legacy `new.delays` / `lapse.delays` fields are not present.
 - `fsrsVersion` / `fsrs_version`: preset-level FSRS picker value. The fork currently stores FSRS 7 as `0`, FSRS 6 as `1`, FSRS 5 as `2`, and FSRS 4 as `3`. If absent, the add-on treats the preset as the Anki main-branch shape before the FSRS picker and does not show or write the FSRS version column.
 - `fsrsParams7`, `fsrsParams6`, `fsrsParams5`, `fsrsParams4` and snake-case variants: shown in the FSRS params column with each value truncated to at most 3 decimal places; optimize updates the parameter list matching the selected FSRS version.
 - `fsrs7IncludeSameDayOptimize` / `fsrs7IncludeSameDayEvaluate`: auxiliary legacy deck-config keys used by the local Anki fork for FSRS-7 same-day flags.
@@ -25,6 +28,10 @@ On Anki builds without FSRS-7 support, the same-day columns are hidden and FSRS 
 The bulk FSRS control changes the preset-level `fsrsVersion` / `fsrs_version` field for every preset currently shown in the table that already has an FSRS picker field. The values are written only when the user clicks Save, or when another action first saves the table before running. The add-on always offers FSRS 7 and FSRS 6 when the picker exists, and also offers older FSRS versions when matching parameter fields are present in the preset payload.
 
 The bulk Desired Retention control changes the preset-level Desired Retention fields for every preset currently shown in the table. The values are written only when the user clicks Save, or when another action first saves the table before running.
+
+The Learning steps and Relearning steps columns read and write preset-level step arrays. The editor displays these with Anki's deck-options step format: space-separated whole values with `s`, `m`, `h`, or `d` suffixes, such as `10m 1h 1d`. A bare number is parsed as minutes. Empty step text writes an empty list. Values that Anki's parser treats as zero are ignored. When a legacy Anki deck-config payload contains both nested legacy delays and ignored top-level step keys, the add-on uses and updates the nested legacy delays.
+
+The bulk step control changes both preset-level step arrays for every preset currently shown in the table. The values are normalized through the same parser before they are copied into preset rows. They are written only when the user clicks Save, or when another action first saves the table before running.
 
 ## Deck data
 
@@ -48,5 +55,7 @@ If any existing preset or deck already stores a lower desired-retention value th
 ## Optimize and evaluate
 
 Optimize uses Anki's `compute_fsrs_params` backend method, then writes the returned parameters to the preset and saves it through `mw.col.decks.update_config()`.
+
+The optimize request includes the number of relearning steps whose cumulative delay is still under one day.
 
 Evaluate uses Anki's `evaluate_params_legacy` backend method with the preset's selected FSRS parameters. For FSRS-7 presets, the request includes the stored same-day evaluate flag.

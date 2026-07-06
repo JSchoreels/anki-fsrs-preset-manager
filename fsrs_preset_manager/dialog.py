@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from aqt.qt import (
@@ -19,20 +20,38 @@ from aqt.qt import (
 )
 from aqt.utils import showInfo, showWarning
 
-from .fsrs_payload import format_fsrs_params, fsrs_version_label
+from .fsrs_payload import (
+    format_fsrs_params,
+    format_steps,
+    fsrs_version_label,
+    normalize_steps_text,
+    parse_steps,
+)
 from .gateway import AnkiGateway
 from .models import DeckEntry, PresetEntry
 
 COL_NAME = 0
 COL_FSRS = 1
 COL_RETENTION = 2
-COL_OVERRIDE = 3
-COL_OPTIMIZE_SAME_DAY = 4
-COL_EVALUATE_SAME_DAY = 5
-COL_OPTIMIZE = 6
-COL_EVALUATE = 7
-COL_DECK_OPTIONS = 8
-COL_PARAMS = 9
+COL_LEARNING_STEPS = 3
+COL_RELEARNING_STEPS = 4
+COL_OVERRIDE = 5
+COL_OPTIMIZE_SAME_DAY = 6
+COL_EVALUATE_SAME_DAY = 7
+COL_OPTIMIZE = 8
+COL_EVALUATE = 9
+COL_DECK_OPTIONS = 10
+COL_PARAMS = 11
+
+
+@dataclass(frozen=True)
+class PresetWidgets:
+    fsrs_combo: QComboBox | None
+    retention: QDoubleSpinBox
+    learning_steps: QLineEdit
+    relearning_steps: QLineEdit
+    optimize_same_day: QCheckBox | None
+    evaluate_same_day: QCheckBox | None
 
 
 class SortableTreeWidgetItem(QTreeWidgetItem):
@@ -66,11 +85,11 @@ class FsrsPresetManagerDialog(QDialog):
         self.gateway = gateway or AnkiGateway(mw)
         self.presets: list[PresetEntry] = []
         self.desired_retention_minimum = self.gateway.desired_retention_minimum()
-        self._preset_widgets: dict[int, tuple[QComboBox | None, QDoubleSpinBox, QCheckBox | None, QCheckBox | None]] = {}
+        self._preset_widgets: dict[int, PresetWidgets] = {}
         self._preset_items: dict[int, SortableTreeWidgetItem] = {}
         self._deck_widgets: dict[int, tuple[DeckEntry, QCheckBox, QDoubleSpinBox]] = {}
         self.setWindowTitle("FSRS Preset Manager")
-        self.resize(980, 640)
+        self.resize(1240, 640)
         self._setup_ui()
         self.refresh()
 
@@ -105,13 +124,28 @@ class FsrsPresetManagerDialog(QDialog):
         toolbar.addWidget(refresh_button)
         root.addLayout(toolbar)
 
+        steps_toolbar = QHBoxLayout()
+        steps_toolbar.addWidget(QLabel("Default learning steps"))
+        self.default_learning_steps = steps_line("1m 10m")
+        steps_toolbar.addWidget(self.default_learning_steps)
+        steps_toolbar.addWidget(QLabel("Default relearning steps"))
+        self.default_relearning_steps = steps_line("10m")
+        steps_toolbar.addWidget(self.default_relearning_steps)
+        apply_default_steps_button = QPushButton("Apply Steps to All Presets")
+        apply_default_steps_button.clicked.connect(self.apply_default_steps_to_presets)
+        steps_toolbar.addWidget(apply_default_steps_button)
+        steps_toolbar.addStretch()
+        root.addLayout(steps_toolbar)
+
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(10)
+        self.tree.setColumnCount(12)
         self.tree.setHeaderLabels(
             [
                 "Preset / deck",
                 "FSRS",
                 "Desired retention",
+                "Learning steps",
+                "Relearning steps",
                 "Deck Override",
                 "FSRS-7 optimize same-day",
                 "FSRS-7 evaluate same-day",
@@ -179,6 +213,16 @@ class FsrsPresetManagerDialog(QDialog):
             item.set_sort_value(COL_RETENTION, retention.value())
             self.tree.setItemWidget(item, COL_RETENTION, retention)
 
+            learning_steps = steps_line(format_steps(preset.learning_steps))
+            item.setText(COL_LEARNING_STEPS, learning_steps.text())
+            item.set_sort_value(COL_LEARNING_STEPS, tuple(preset.learning_steps))
+            self.tree.setItemWidget(item, COL_LEARNING_STEPS, learning_steps)
+
+            relearning_steps = steps_line(format_steps(preset.relearning_steps))
+            item.setText(COL_RELEARNING_STEPS, relearning_steps.text())
+            item.set_sort_value(COL_RELEARNING_STEPS, tuple(preset.relearning_steps))
+            self.tree.setItemWidget(item, COL_RELEARNING_STEPS, relearning_steps)
+
             params_text = format_fsrs_params(preset.params)
             item.setText(COL_PARAMS, params_text)
             item.set_sort_value(COL_PARAMS, tuple(preset.params))
@@ -210,7 +254,14 @@ class FsrsPresetManagerDialog(QDialog):
             self.tree.setItemWidget(item, COL_OPTIMIZE, optimize_button)
             self.tree.setItemWidget(item, COL_EVALUATE, evaluate_button)
             self.tree.setItemWidget(item, COL_DECK_OPTIONS, deck_options_button)
-            self._preset_widgets[preset.preset_id] = (fsrs_combo, retention, optimize_same_day, evaluate_same_day)
+            self._preset_widgets[preset.preset_id] = PresetWidgets(
+                fsrs_combo=fsrs_combo,
+                retention=retention,
+                learning_steps=learning_steps,
+                relearning_steps=relearning_steps,
+                optimize_same_day=optimize_same_day,
+                evaluate_same_day=evaluate_same_day,
+            )
 
             if self.show_decks.isChecked():
                 for deck in preset.decks:
@@ -249,7 +300,7 @@ class FsrsPresetManagerDialog(QDialog):
     def apply_default_retention_to_presets(self) -> None:
         value = self.default_retention.value()
         for preset_id, widgets in self._preset_widgets.items():
-            _, retention, _, _ = widgets
+            retention = widgets.retention
             retention.setValue(value)
             item = self._preset_items.get(preset_id)
             if item is not None:
@@ -262,7 +313,7 @@ class FsrsPresetManagerDialog(QDialog):
         if value is None:
             return
         for preset_id, widgets in self._preset_widgets.items():
-            fsrs_combo, _, _, _ = widgets
+            fsrs_combo = widgets.fsrs_combo
             if fsrs_combo is None:
                 continue
             index = fsrs_combo.findData(value)
@@ -275,16 +326,55 @@ class FsrsPresetManagerDialog(QDialog):
                 item.set_sort_value(COL_FSRS, value)
         self.tree.sortItems(self.tree.sortColumn(), self.tree.header().sortIndicatorOrder())
 
+    def apply_default_steps_to_presets(self) -> None:
+        try:
+            learning_text = normalize_steps_text(self.default_learning_steps.text())
+            learning_steps = parse_steps(learning_text)
+            relearning_text = normalize_steps_text(self.default_relearning_steps.text())
+            relearning_steps = parse_steps(relearning_text)
+        except ValueError as exc:
+            showWarning(f"Unable to apply preset steps:\n{exc}", parent=self)
+            return
+        self.default_learning_steps.setText(learning_text)
+        self.default_relearning_steps.setText(relearning_text)
+        for preset_id, widgets in self._preset_widgets.items():
+            widgets.learning_steps.setText(learning_text)
+            widgets.relearning_steps.setText(relearning_text)
+            item = self._preset_items.get(preset_id)
+            if item is not None:
+                item.setText(COL_LEARNING_STEPS, learning_text)
+                item.set_sort_value(COL_LEARNING_STEPS, learning_steps)
+                item.setText(COL_RELEARNING_STEPS, relearning_text)
+                item.set_sort_value(COL_RELEARNING_STEPS, relearning_steps)
+        self.tree.sortItems(self.tree.sortColumn(), self.tree.header().sortIndicatorOrder())
+
     def save_all(self, *, show_message: bool = True, refresh: bool = True) -> bool:
         try:
+            preset_values = []
             for preset in self.presets:
-                fsrs_combo, retention, optimize_same_day, evaluate_same_day = self._preset_widgets[preset.preset_id]
+                widgets = self._preset_widgets[preset.preset_id]
+                try:
+                    learning_steps = parse_steps(widgets.learning_steps.text())
+                    relearning_steps = parse_steps(widgets.relearning_steps.text())
+                except ValueError as exc:
+                    raise ValueError(f"{preset.name}: {exc}") from None
+                preset_values.append(
+                    (
+                        preset,
+                        widgets,
+                        learning_steps,
+                        relearning_steps,
+                    )
+                )
+            for preset, widgets, learning_steps, relearning_steps in preset_values:
                 self.gateway.save_preset(
                     preset,
-                    desired_retention_value=retention.value(),
-                    fsrs_version_value=selected_combo_data(fsrs_combo) if fsrs_combo else None,
-                    include_same_day_optimize=optimize_same_day.isChecked() if optimize_same_day else None,
-                    include_same_day_evaluate=evaluate_same_day.isChecked() if evaluate_same_day else None,
+                    desired_retention_value=widgets.retention.value(),
+                    fsrs_version_value=selected_combo_data(widgets.fsrs_combo) if widgets.fsrs_combo else None,
+                    learning_steps_value=learning_steps,
+                    relearning_steps_value=relearning_steps,
+                    include_same_day_optimize=widgets.optimize_same_day.isChecked() if widgets.optimize_same_day else None,
+                    include_same_day_evaluate=widgets.evaluate_same_day.isChecked() if widgets.evaluate_same_day else None,
                 )
             for deck, override, retention in self._deck_widgets.values():
                 self.gateway.save_deck_override(deck, retention.value() if override.isChecked() else None)
@@ -387,6 +477,13 @@ def params_line(value: str) -> QLineEdit:
     widget.setReadOnly(True)
     widget.setMinimumWidth(260)
     widget.setToolTip(value)
+    return widget
+
+
+def steps_line(value: str) -> QLineEdit:
+    widget = QLineEdit(value)
+    widget.setMinimumWidth(130)
+    widget.setToolTip("Space-separated steps, such as 10m 1h 1d")
     return widget
 
 

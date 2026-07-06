@@ -8,12 +8,19 @@ from fsrs_preset_manager.fsrs_payload import (
     FSRS7_SAME_DAY_OPTIMIZE_KEY,
     available_fsrs_versions,
     desired_retention,
+    format_steps,
     format_fsrs_params,
     fsrs_version,
+    learning_steps,
+    normalize_steps_text,
+    parse_steps,
+    relearning_steps,
     same_day_settings,
     selected_fsrs_params,
     set_desired_retention,
     set_fsrs_version,
+    set_learning_steps,
+    set_relearning_steps,
     set_same_day_settings,
     set_selected_fsrs_params,
 )
@@ -35,6 +42,73 @@ def test_desired_retention_writes_none_for_deck_override_clear() -> None:
     set_desired_retention(payload, None)
 
     assert payload["desiredRetention"] is None
+
+
+def test_step_helpers_read_and_write_existing_keys() -> None:
+    payload = {"learnSteps": [1, "10.5"], "relearnSteps": [5]}
+
+    assert learning_steps(payload) == (1.0, 10.5)
+    assert relearning_steps(payload) == (5.0,)
+
+    set_learning_steps(payload, (2, 20))
+    set_relearning_steps(payload, (7.5,))
+
+    assert payload["learnSteps"] == [2.0, 20.0]
+    assert payload["relearnSteps"] == [7.5]
+
+
+def test_step_helpers_update_anki_legacy_nested_delays() -> None:
+    payload = {
+        "new": {"delays": [1, "10.5"]},
+        "lapse": {"delays": [5]},
+    }
+
+    assert learning_steps(payload) == (1.0, 10.5)
+    assert relearning_steps(payload) == (5.0,)
+
+    set_learning_steps(payload, (2, 20))
+    set_relearning_steps(payload, (7.5,))
+
+    assert payload["new"]["delays"] == [2.0, 20.0]
+    assert payload["lapse"]["delays"] == [7.5]
+
+
+def test_step_helpers_prefer_legacy_delays_over_stale_top_level_keys() -> None:
+    payload = {
+        "learnSteps": [99],
+        "relearnSteps": [98],
+        "new": {"delays": [1, 10]},
+        "lapse": {"delays": [5]},
+    }
+
+    assert learning_steps(payload) == (1.0, 10.0)
+    assert relearning_steps(payload) == (5.0,)
+
+    set_learning_steps(payload, (2,))
+    set_relearning_steps(payload, (3,))
+
+    assert payload["new"]["delays"] == [2.0]
+    assert payload["lapse"]["delays"] == [3.0]
+    assert "learnSteps" not in payload
+    assert "relearnSteps" not in payload
+
+
+def test_parse_steps_accepts_anki_deck_options_format() -> None:
+    assert parse_steps("1m 10m 1h 2h 1d") == (1.0, 10.0, 60.0, 120.0, 1440.0)
+    assert parse_steps("") == ()
+
+
+def test_parse_steps_matches_anki_deck_options_tolerant_parser() -> None:
+    assert parse_steps("1 hello 2 0 -1") == (1.0, 2.0, 1.0)
+
+
+def test_format_steps_uses_anki_deck_options_units() -> None:
+    assert format_steps((1, 10, 60, 120, 1440)) == "1m 10m 1h 2h 1d"
+    assert format_steps((1 / 60, 5 / 60, 1.5, 400)) == "1s 5s 90s 400m"
+
+
+def test_normalize_steps_text_parses_and_formats_bulk_step_input() -> None:
+    assert normalize_steps_text("1 10m 1h") == "1m 10m 1h"
 
 
 def test_same_day_settings_default_to_disabled_for_fsrs7() -> None:
